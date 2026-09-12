@@ -518,8 +518,8 @@ export default function Home() {
             </button>
           </div>
 
-          {/* image area */}
-          <div className="flex-1 flex items-center justify-center p-4 md:p-8 overflow-hidden relative bg-white">
+          {/* image area — height full screen, width aspect ratio */}
+          <div className="flex-1 flex items-center justify-center p-0 overflow-hidden relative bg-white">
             {/* prev */}
             <button
               onClick={goPrev}
@@ -532,7 +532,7 @@ export default function Home() {
             <img
               src={lightbox.group.urls[lightbox.idx]}
               alt={`Fullscreen ${lightbox.idx + 1}`}
-              className="max-w-full max-h-[72vh] md:max-h-[78vh] object-contain border border-neutral-900 bg-[#f9f9f9] rounded-none"
+              className="h-[calc(100dvh-96px)] w-auto max-w-[100vw] object-contain border border-neutral-900 bg-[#f9f9f9] rounded-none"
               onError={(e) => {
                 const t = e.currentTarget;
                 if (!t.dataset.retried) {

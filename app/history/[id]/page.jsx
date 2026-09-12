@@ -223,10 +223,10 @@ export default function HistoryDetailPage() {
             <span className="text-[11px] tracking-[0.16em] font-mono uppercase">(SELECTOR: {lightbox.group.selector}) — {lightbox.idx+1} / {lightbox.group.urls.length}</span>
             <button onClick={closeLightbox} className="h-[32px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900">[ CLOSE ]</button>
           </div>
-          <div className="flex-1 flex items-center justify-center p-4 md:p-8 bg-white relative">
-            <button onClick={goPrev} className="absolute left-2 md:left-6 top-1/2 -translate-y-1/2 h-[44px] px-4 bg-[#f9f9f9] border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-neutral-900 hover:text-white">[ PREV ]</button>
-            <img src={lightbox.group.urls[lightbox.idx]} alt="" className="max-w-full max-h-[72vh] md:max-h-[78vh] object-contain border border-neutral-900 bg-[#f9f9f9] rounded-none" onError={e=>{ const t=e.currentTarget; if(!t.dataset.retried){ t.dataset.retried="1"; t.src=`/api/proxy?url=${encodeURIComponent(lightbox.group.urls[lightbox.idx])}`; }}} />
-            <button onClick={goNext} className="absolute right-2 md:right-6 top-1/2 -translate-y-1/2 h-[44px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900">[ NEXT ]</button>
+          <div className="flex-1 flex items-center justify-center p-0 overflow-hidden relative bg-white">
+            <button onClick={goPrev} className="absolute left-2 md:left-6 top-1/2 -translate-y-1/2 h-[44px] px-4 bg-[#f9f9f9] border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-neutral-900 hover:text-white z-10">[ PREV ]</button>
+            <img src={lightbox.group.urls[lightbox.idx]} alt="" className="h-[calc(100dvh-96px)] w-auto max-w-[100vw] object-contain border border-neutral-900 bg-[#f9f9f9] rounded-none" onError={e=>{ const t=e.currentTarget; if(!t.dataset.retried){ t.dataset.retried="1"; t.src=`/api/proxy?url=${encodeURIComponent(lightbox.group.urls[lightbox.idx])}`; }}} />
+            <button onClick={goNext} className="absolute right-2 md:right-6 top-1/2 -translate-y-1/2 h-[44px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900 z-10">[ NEXT ]</button>
           </div>
           <div className="h-[48px] border-t border-neutral-900 flex items-center justify-center px-4 bg-[#f9f9f9]">
             <span className="text-[11px] font-mono tracking-[0.14em] uppercase text-neutral-500">{String(lightbox.idx+1).padStart(2,"0")} / {String(lightbox.group.urls.length).padStart(2,"0")}</span>
