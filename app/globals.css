@@ -3,18 +3,21 @@
 @tailwind utilities;
 
 body {
-  font-family: Inter, system-ui, -apple-system, sans-serif;
+  font-family: Inter, Helvetica, Arial, sans-serif;
+  background: #f9f9f9;
+  color: #171717;
 }
 
-/* custom scrollbar */
+/* Brutalist scrollbar - squared */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: #f9f9f9;
+  border-left: 1px solid #171717;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #171717;
+  border-radius: 0;
 }
