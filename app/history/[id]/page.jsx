@@ -1,10 +1,70 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+
+function VirtualGrid({ urls, group, groupIdx, onOpen }) {
+  const [visible, setVisible] = useState(16);
+  const sentinelRef = useRef(null);
+  useEffect(() => setVisible(16), [urls]);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) setVisible((v) => Math.min(v + 16, urls.length));
+      },
+      { rootMargin: "800px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [urls.length, visible < urls.length]);
+  const visibleUrls = urls.slice(0, visible);
+  return (
+    <>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3" style={{ contentVisibility: "auto" }}>
+        {visibleUrls.map((imgUrl, i) => (
+          <button
+            key={`${imgUrl}-${i}`}
+            onClick={() => onOpen(group, groupIdx, i)}
+            className="aspect-square bg-white border border-neutral-900 overflow-hidden rounded-none"
+          >
+            <img
+              src={imgUrl}
+              alt={`${group.selector} ${i + 1}`}
+              loading="lazy"
+              decoding="async"
+              className="w-full h-full object-cover rounded-none pointer-events-none"
+              onError={(e) => {
+                const t = e.currentTarget;
+                if (!t.dataset.retried) {
+                  t.dataset.retried = "1";
+                  t.src = `/api/proxy?url=${encodeURIComponent(imgUrl)}`;
+                }
+              }}
+            />
+          </button>
+        ))}
+      </div>
+      {visible < urls.length && (
+        <div ref={sentinelRef} className="py-6 flex flex-col items-center gap-3">
+          <div className="text-[11px] tracking-[0.16em] font-mono uppercase text-neutral-500">
+            ({visible} / {urls.length} — {urls.length - visible} MORE)
+          </div>
+          <button
+            onClick={() => setVisible((v) => Math.min(v + 32, urls.length))}
+            className="border border-neutral-900 bg-white px-6 py-2 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-neutral-900 hover:text-white"
+          >
+            [ LOAD MORE ]
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
 
 function sanitizeForFilename(name) {
   if (!name) return "Product_Images";
@@ -147,12 +207,8 @@ export default function HistoryDetailPage() {
                 </button>
               </div>
               <div className="mt-4 border-b border-neutral-200" />
-              <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-                {group.urls.map((imgUrl, i) => (
-                  <button key={`${imgUrl}-${i}`} onClick={() => openLightbox(group, idx, i)} className="aspect-square bg-white border border-neutral-900 overflow-hidden rounded-none">
-                    <img src={imgUrl} alt={`${group.selector} ${i+1}`} loading="lazy" className="w-full h-full object-cover rounded-none pointer-events-none" onError={e=>{ const t=e.currentTarget; if(!t.dataset.retried){ t.dataset.retried="1"; t.src=`/api/proxy?url=${encodeURIComponent(imgUrl)}`; }}} />
-                  </button>
-                ))}
+              <div className="mt-4">
+                <VirtualGrid urls={group.urls} group={group} groupIdx={idx} onOpen={openLightbox} />
               </div>
             </div>
           ))}
