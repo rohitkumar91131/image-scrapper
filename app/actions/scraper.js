@@ -9,6 +9,15 @@ import http from "http";
 const httpsAgent = new https.Agent({ keepAlive: true, rejectUnauthorized: true });
 const httpAgent = new http.Agent({ keepAlive: true });
 
+// ZenRows — set ZENROWS_API_KEY in .env (local) and Vercel env (prod)
+// When present, all fetches go via residential premium_proxy (bypasses Vercel IP + ISP block)
+function getZenRowsUrl(pageUrl) {
+  const key = process.env.ZENROWS_API_KEY;
+  if (!key) return null;
+  // premium_proxy=true = residential IP (for adult/Cloudflare), js_render=false = cheaper, set true if site needs JS
+  return `https://api.zenrows.com/v1/?apikey=${key}&url=${encodeURIComponent(pageUrl)}&premium_proxy=true`;
+}
+
 const UAS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -91,6 +100,30 @@ function isValidImageHref(href) {
 }
 
 async function fetchHtmlWithRetry(pageUrl, maxRetries = 3) {
+  const zenUrl = getZenRowsUrl(pageUrl);
+  // If ZenRows is configured, use it directly (no retry needed for IP block)
+  if (zenUrl) {
+    try {
+      const { data } = await axios.get(zenUrl, {
+        timeout: 20000, // ZenRows needs more time for premium proxy
+        headers: buildHeaders(pageUrl),
+        validateStatus: (s) => s >= 200 && s < 400,
+        maxRedirects: 5,
+        responseType: "text",
+        decompress: true,
+        httpAgent,
+        httpsAgent,
+      });
+      if (typeof data === "string" && data.length > 0) return data;
+      // ZenRows sometimes returns JSON with error
+      if (typeof data === "object" && data.html) return data.html;
+      throw new Error("Empty ZenRows response");
+    } catch (err) {
+      // Fall through to direct fetch if ZenRows fails (invalid key, etc.)
+      console.warn("ZenRows failed, falling back to direct:", err.message?.slice(0,120));
+    }
+  }
+
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -181,6 +214,19 @@ export async function scrapeImages(pageUrl) {
   const urlsToTry = [pageUrl, ...getAlternateUrls(pageUrl)];
   let fetchedUrl = pageUrl;
   for (const tryUrl of urlsToTry) {
+    // If ZenRows is configured, try it first for this variant
+    const zenUrl = getZenRowsUrl(tryUrl);
+    if (zenUrl) {
+      try {
+        html = await fetchHtmlWithRetry(tryUrl, 3); // fetchHtmlWithRetry will use ZenRows internally
+        fetchedUrl = tryUrl;
+        break;
+      } catch (err) {
+        lastErr = err;
+        // ZenRows already tried, now try alternate variant
+        continue;
+      }
+    }
     try {
       html = await fetchHtmlWithRetry(tryUrl, 3);
       fetchedUrl = tryUrl;
@@ -189,7 +235,9 @@ export async function scrapeImages(pageUrl) {
       lastErr = err;
       // Fallback to native fetch for this variant
       try {
-        const res = await fetch(tryUrl, {
+        const zenFallback = getZenRowsUrl(tryUrl);
+        const fetchUrl = zenFallback || tryUrl;
+        const res = await fetch(fetchUrl, {
           headers: buildHeaders(tryUrl),
           signal: AbortSignal.timeout(10000),
           redirect: "follow",
