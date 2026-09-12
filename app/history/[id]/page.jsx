@@ -138,6 +138,18 @@ export default function HistoryDetailPage() {
   const closeLightbox=()=>setLightbox(null);
   const goNext=()=>setLightbox(p=>p?{...p,idx:(p.idx+1)%p.group.urls.length}:p);
   const goPrev=()=>setLightbox(p=>p?{...p,idx:(p.idx-1+p.group.urls.length)%p.group.urls.length}:p);
+  const handleDownloadSingle=async()=>{
+    if(!lightbox) return;
+    const url=lightbox.group.urls[lightbox.idx];
+    try{
+      const proxied=`/api/proxy?url=${encodeURIComponent(url)}`;
+      let res=await fetch(proxied);
+      if(!res.ok) res=await fetch(url,{mode:"cors"});
+      if(!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob=await res.blob();
+      saveAs(blob,getSafeFilename(url,lightbox.idx));
+    }catch{ window.open(url,"_blank"); }
+  };
   useEffect(()=>{
     if(!lightbox) return;
     const onKey=e=>{ if(e.key==="Escape") closeLightbox(); if(e.key==="ArrowRight") goNext(); if(e.key==="ArrowLeft") goPrev(); };
@@ -163,7 +175,10 @@ export default function HistoryDetailPage() {
       <header className="border-b border-neutral-900">
         <div className="max-w-[1280px] mx-auto px-6 md:px-8 h-[48px] flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link href="/" className="text-[11px] tracking-[0.22em] font-mono uppercase hover:underline">(HOME)</Link>
+            <Link href="/" className="flex items-center gap-2">
+              <img src="/logo.svg" alt="PIXELVAULT" className="h-[28px] w-auto" />
+              <span className="text-[11px] tracking-[0.22em] font-mono uppercase hover:underline hidden md:inline">(HOME)</span>
+            </Link>
             <Link href="/history" className="text-[11px] tracking-[0.22em] font-mono uppercase border border-neutral-900 px-2.5 py-1 bg-white hover:bg-neutral-900 hover:text-white">(HISTORY)</Link>
           </div>
           <span className="text-[11px] tracking-[0.22em] font-mono uppercase hidden md:inline">(DETAIL)</span>
@@ -220,8 +235,12 @@ export default function HistoryDetailPage() {
       {lightbox && (
         <div className="fixed inset-0 z-50 bg-[#f9f9f9] text-neutral-900 flex flex-col">
           <div className="h-[48px] border-b border-neutral-900 flex items-center justify-between px-4 md:px-6 bg-[#f9f9f9]">
-            <span className="text-[11px] tracking-[0.16em] font-mono uppercase">(SELECTOR: {lightbox.group.selector}) — {lightbox.idx+1} / {lightbox.group.urls.length}</span>
-            <button onClick={closeLightbox} className="h-[32px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900">[ CLOSE ]</button>
+            <span className="text-[11px] tracking-[0.16em] font-mono uppercase hidden md:inline">(SELECTOR: {lightbox.group.selector}) — {lightbox.idx+1} / {lightbox.group.urls.length}</span>
+            <span className="text-[11px] tracking-[0.16em] font-mono uppercase md:hidden">{lightbox.idx+1} / {lightbox.group.urls.length}</span>
+            <div className="flex items-center gap-2">
+              <button onClick={handleDownloadSingle} className="h-[32px] px-4 bg-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-neutral-900 hover:text-white">[ DOWNLOAD ]</button>
+              <button onClick={closeLightbox} className="h-[32px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900">[ CLOSE ]</button>
+            </div>
           </div>
           <div className="flex-1 flex items-center justify-center p-0 overflow-hidden relative bg-white">
             <button onClick={goPrev} className="absolute left-2 md:left-6 top-1/2 -translate-y-1/2 h-[44px] px-4 bg-[#f9f9f9] border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-neutral-900 hover:text-white z-10">[ PREV ]</button>

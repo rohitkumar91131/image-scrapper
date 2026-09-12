@@ -3,6 +3,9 @@ import "./globals.css";
 export const metadata = {
   title: "PIXELVAULT — Editorial Image Scraper",
   description: "Minimalist neo-brutalist image scraper — PIXELVAULT",
+  icons: {
+    icon: "/logo.svg",
+  },
 };
 
 export default function RootLayout({ children }) {

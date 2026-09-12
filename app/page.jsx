@@ -257,6 +257,21 @@ export default function Home() {
       const len = prev.group.urls.length;
       return { ...prev, idx: (prev.idx - 1 + len) % len };
     });
+  const handleDownloadSingle = async () => {
+    if (!lightbox) return;
+    const url = lightbox.group.urls[lightbox.idx];
+    try {
+      const proxied = `/api/proxy?url=${encodeURIComponent(url)}`;
+      let res = await fetch(proxied);
+      if (!res.ok) res = await fetch(url, { mode: "cors" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const filename = getSafeFilename(url, lightbox.idx);
+      saveAs(blob, filename);
+    } catch {
+      window.open(url, "_blank");
+    }
+  };
 
   useEffect(() => {
     if (!lightbox) return;
@@ -281,7 +296,10 @@ export default function Home() {
       <header className="border-b border-neutral-900">
         <div className="max-w-[1280px] mx-auto px-6 md:px-8 h-[48px] flex items-center justify-between">
           <div className="flex items-center gap-4 md:gap-6">
-            <span className="text-[11px] tracking-[0.22em] font-mono uppercase">(TOOLS)</span>
+            <Link href="/" className="flex items-center gap-2">
+              <img src="/logo.svg" alt="PIXELVAULT" className="h-[28px] w-auto" />
+              <span className="text-[11px] tracking-[0.22em] font-mono uppercase hidden md:inline">(TOOLS)</span>
+            </Link>
             <Link href="/history" className="text-[11px] tracking-[0.22em] font-mono uppercase border border-neutral-900 px-2.5 py-1 bg-white hover:bg-neutral-900 hover:text-white">
               (HISTORY)
             </Link>
@@ -510,12 +528,20 @@ export default function Home() {
             <span className="text-[11px] tracking-[0.16em] font-mono uppercase">
               (SELECTOR: {lightbox.group.selector}) — {lightbox.idx + 1} / {lightbox.group.urls.length}
             </span>
-            <button
-              onClick={closeLightbox}
-              className="h-[32px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900"
-            >
-              [ CLOSE ]
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDownloadSingle}
+                className="h-[32px] px-4 bg-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-neutral-900 hover:text-white"
+              >
+                [ DOWNLOAD ]
+              </button>
+              <button
+                onClick={closeLightbox}
+                className="h-[32px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900"
+              >
+                [ CLOSE ]
+              </button>
+            </div>
           </div>
 
           {/* image area — height full screen, width aspect ratio */}

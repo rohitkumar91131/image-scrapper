@@ -32,7 +32,10 @@ export default function HistoryPage() {
       <header className="border-b border-neutral-900">
         <div className="max-w-[1280px] mx-auto px-6 md:px-8 h-[48px] flex items-center justify-between">
           <div className="flex items-center gap-4 md:gap-6">
-            <Link href="/" className="text-[11px] tracking-[0.22em] font-mono uppercase hover:underline">(HOME)</Link>
+            <Link href="/" className="flex items-center gap-2">
+              <img src="/logo.svg" alt="PIXELVAULT" className="h-[28px] w-auto" />
+              <span className="text-[11px] tracking-[0.22em] font-mono uppercase hover:underline hidden md:inline">(HOME)</span>
+            </Link>
             <span className="text-[11px] tracking-[0.22em] font-mono uppercase bg-neutral-900 text-white px-2.5 py-1">(HISTORY)</span>
           </div>
           <span className="text-[11px] tracking-[0.22em] font-mono uppercase hidden md:inline">(IMAGE SCRAPER — 2026)</span>
