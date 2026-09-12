@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { scrapeImages } from "./actions/scraper";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -36,6 +36,7 @@ export default function Home() {
   const [data, setData] = useState(null);
   const [downloadingIndex, setDownloadingIndex] = useState(null);
   const [downloadingAll, setDownloadingAll] = useState(false);
+  const [lightbox, setLightbox] = useState(null); // { group, groupIdx, idx }
 
   const handleScan = async (e) => {
     e.preventDefault();
@@ -160,6 +161,39 @@ export default function Home() {
   };
 
   const totalImages = data?.groups ? data.groups.reduce((a, g) => a + g.urls.length, 0) : 0;
+
+  // Lightbox controls
+  const openLightbox = (group, groupIdx, idx) => setLightbox({ group, groupIdx, idx });
+  const closeLightbox = () => setLightbox(null);
+  const goNext = () =>
+    setLightbox((prev) => {
+      if (!prev) return prev;
+      const len = prev.group.urls.length;
+      return { ...prev, idx: (prev.idx + 1) % len };
+    });
+  const goPrev = () =>
+    setLightbox((prev) => {
+      if (!prev) return prev;
+      const len = prev.group.urls.length;
+      return { ...prev, idx: (prev.idx - 1 + len) % len };
+    });
+
+  useEffect(() => {
+    if (!lightbox) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") closeLightbox();
+      if (e.key === "ArrowRight") goNext();
+      if (e.key === "ArrowLeft") goPrev();
+    };
+    window.addEventListener("keydown", onKey);
+    // lock scroll
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [lightbox]);
 
   return (
     <main className="min-h-screen bg-[#f9f9f9] text-neutral-900 selection:bg-neutral-900 selection:text-white">
@@ -334,18 +368,21 @@ export default function Home() {
                   {/* rule */}
                   <div className="mt-4 border-b border-neutral-200" />
 
-                  {/* grid - sharp, squared */}
+                  {/* grid - sharp, squared — tap to fullscreen */}
                   <div className="mt-4 grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
                     {group.urls.map((imgUrl, i) => (
-                      <div
+                      <button
                         key={`${imgUrl}-${i}`}
-                        className="aspect-square bg-white border border-neutral-900 overflow-hidden"
+                        type="button"
+                        onClick={() => openLightbox(group, idx, i)}
+                        className="aspect-square bg-white border border-neutral-900 overflow-hidden text-left rounded-none hover:border-neutral-900 focus:outline-none focus:border-neutral-900"
+                        aria-label={`Open image ${i + 1} fullscreen`}
                       >
                         <img
                           src={imgUrl}
                           alt={`${group.selector} ${i + 1}`}
                           loading="lazy"
-                          className="w-full h-full object-cover rounded-none"
+                          className="w-full h-full object-cover rounded-none pointer-events-none"
                           onError={(e) => {
                             const t = e.currentTarget;
                             if (!t.dataset.retried) {
@@ -354,7 +391,7 @@ export default function Home() {
                             }
                           }}
                         />
-                      </div>
+                      </button>
                     ))}
                   </div>
 
@@ -401,6 +438,85 @@ export default function Home() {
         </div>
         <div className="h-10" />
       </section>
+
+      {/* LIGHTBOX — fullscreen, neo-brutalist */}
+      {lightbox && (
+        <div className="fixed inset-0 z-50 bg-[#f9f9f9] text-neutral-900 flex flex-col">
+          {/* top bar */}
+          <div className="h-[48px] border-b border-neutral-900 flex items-center justify-between px-4 md:px-6 shrink-0 bg-[#f9f9f9]">
+            <span className="text-[11px] tracking-[0.22em] font-mono uppercase hidden md:inline">(VIEWER)</span>
+            <span className="text-[11px] tracking-[0.16em] font-mono uppercase">
+              (SELECTOR: {lightbox.group.selector}) — {lightbox.idx + 1} / {lightbox.group.urls.length}
+            </span>
+            <button
+              onClick={closeLightbox}
+              className="h-[32px] px-4 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900"
+            >
+              [ CLOSE ]
+            </button>
+          </div>
+
+          {/* image area */}
+          <div className="flex-1 flex items-center justify-center p-4 md:p-8 overflow-hidden relative bg-white">
+            {/* prev */}
+            <button
+              onClick={goPrev}
+              className="absolute left-2 md:left-6 top-1/2 -translate-y-1/2 h-[44px] px-4 md:px-6 bg-[#f9f9f9] border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-neutral-900 hover:text-white z-10"
+              aria-label="Previous"
+            >
+              [ PREV ]
+            </button>
+
+            <img
+              src={lightbox.group.urls[lightbox.idx]}
+              alt={`Fullscreen ${lightbox.idx + 1}`}
+              className="max-w-full max-h-[72vh] md:max-h-[78vh] object-contain border border-neutral-900 bg-[#f9f9f9] rounded-none"
+              onError={(e) => {
+                const t = e.currentTarget;
+                if (!t.dataset.retried) {
+                  t.dataset.retried = "1";
+                  t.src = `/api/proxy?url=${encodeURIComponent(lightbox.group.urls[lightbox.idx])}`;
+                }
+              }}
+            />
+
+            {/* next */}
+            <button
+              onClick={goNext}
+              className="absolute right-2 md:right-6 top-1/2 -translate-y-1/2 h-[44px] px-4 md:px-6 bg-neutral-900 text-white border border-neutral-900 rounded-none text-[11px] tracking-[0.16em] font-mono uppercase hover:bg-white hover:text-neutral-900 z-10"
+              aria-label="Next"
+            >
+              [ NEXT ]
+            </button>
+          </div>
+
+          {/* bottom bar — url + counter */}
+          <div className="h-auto md:h-[48px] border-t border-neutral-900 flex flex-col md:flex-row items-center justify-between gap-2 px-4 md:px-6 py-3 bg-[#f9f9f9] shrink-0">
+            <span className="text-[11px] font-mono tracking-[0.14em] uppercase text-neutral-500 order-2 md:order-1">
+              {String(lightbox.idx + 1).padStart(2, "0")} / {String(lightbox.group.urls.length).padStart(2, "0")}
+            </span>
+            <a
+              href={lightbox.group.urls[lightbox.idx]}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] font-mono break-all underline hover:no-underline max-w-full md:max-w-[60%] text-center order-1 md:order-2"
+            >
+              {lightbox.group.urls[lightbox.idx]}
+            </a>
+            <span className="text-[11px] tracking-[0.16em] font-mono uppercase text-neutral-500 hidden md:inline order-3">
+              (ARROWS / ESC)
+            </span>
+          </div>
+
+          {/* click backdrop to close */}
+          <button
+            aria-label="Close backdrop"
+            onClick={closeLightbox}
+            className="absolute inset-0 -z-10"
+            tabIndex={-1}
+          />
+        </div>
+      )}
     </main>
   );
 }
