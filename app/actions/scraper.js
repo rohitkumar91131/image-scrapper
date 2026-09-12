@@ -155,33 +155,80 @@ export async function scrapeImages(pageUrl) {
     return { success: false, error: "Invalid URL format" };
   }
 
-  let html;
-  try {
-    html = await fetchHtmlWithRetry(pageUrl, 3);
-  } catch (err) {
-    // Fallback to native fetch (undici) — sometimes axios blocked but fetch works
+  function getAlternateUrls(original) {
     try {
-      const res = await fetch(pageUrl, {
-        headers: buildHeaders(pageUrl),
-        signal: AbortSignal.timeout(10000),
-        redirect: "follow",
-      });
-      if (!res.ok) throw new Error(`Fetch failed ${res.status} ${res.statusText}`);
-      html = await res.text();
-      if (!html || html.length < 100) throw new Error("Empty fallback response");
-    } catch (fallbackErr) {
-      const status = err.response?.status;
-      const msg = status
-        ? `Request failed with status ${status}: ${err.response?.statusText || err.message}`
-        : err.code === "ECONNABORTED" || fallbackErr.name === "TimeoutError"
-        ? "Request timed out after 10s — site may be slow or blocking Vercel IPs. Try again."
-        : (err.message && err.message.toLowerCase().includes("econnreset")) ||
-          (fallbackErr.message || "").toLowerCase().includes("econnreset")
-        ? "Connection reset by target site (ECONNRESET) — site is blocking bot / Vercel IP. Retried 3x. Try again in 10s or try http:// variant."
-        : err.message || fallbackErr.message || "Failed to fetch page";
-      return { success: false, error: msg };
+      const u = new URL(original);
+      const variants = new Set();
+      const host = u.hostname;
+      const path = u.pathname + u.search + u.hash;
+      // toggle www
+      const withoutWww = host.startsWith("www.") ? host.slice(4) : host;
+      const withWww = host.startsWith("www.") ? host : `www.${host}`;
+      for (const h of [host, withoutWww, withWww]) {
+        for (const proto of ["https:", "http:"]) {
+          variants.add(`${proto}//${h}${path}`);
+        }
+      }
+      variants.delete(original);
+      return Array.from(variants).slice(0, 3);
+    } catch {
+      return [];
     }
   }
+
+  let html;
+  let lastErr = null;
+  const urlsToTry = [pageUrl, ...getAlternateUrls(pageUrl)];
+  let fetchedUrl = pageUrl;
+  for (const tryUrl of urlsToTry) {
+    try {
+      html = await fetchHtmlWithRetry(tryUrl, 3);
+      fetchedUrl = tryUrl;
+      break;
+    } catch (err) {
+      lastErr = err;
+      // Fallback to native fetch for this variant
+      try {
+        const res = await fetch(tryUrl, {
+          headers: buildHeaders(tryUrl),
+          signal: AbortSignal.timeout(10000),
+          redirect: "follow",
+        });
+        if (!res.ok) throw new Error(`Fetch failed ${res.status} ${res.statusText}`);
+        const text = await res.text();
+        if (!text || text.length < 100) throw new Error("Empty fallback response");
+        html = text;
+        fetchedUrl = tryUrl;
+        break;
+      } catch (fallbackErr) {
+        lastErr = fallbackErr.message?.toLowerCase().includes("econnreset") ? err : fallbackErr;
+        // continue to next variant if ECONNRESET
+        const isConnReset =
+          (err.message || "").toLowerCase().includes("econnreset") ||
+          (fallbackErr.message || "").toLowerCase().includes("econnreset") ||
+          err.code === "ECONNRESET";
+        if (isConnReset) continue;
+        // for non-ECONNRESET, don't try alternates
+        break;
+      }
+    }
+  }
+
+  if (!html) {
+    const err = lastErr;
+    const status = err?.response?.status;
+    const msg = status
+      ? `Request failed with status ${status}: ${err.response?.statusText || err.message}`
+      : err?.code === "ECONNABORTED" || err?.name === "TimeoutError"
+      ? "Request timed out after 10s — site slow hai, 10s baad retry karo."
+      : (err?.message || "").toLowerCase().includes("econnreset")
+      ? "Connection reset (ECONNRESET) — ye site Vercel ke datacenter IP ko block kar raha hai + India me ISP bhi adult sites ka SNI reset karta hai. Fix: 1) Local pe 'npm run dev' se try karo (tumhara residential IP), 2) VPN on karke try karo, 3) http:// variant try karo, 4) Self-host on VPS with residential proxy."
+      : err?.message || "Failed to fetch page — site may block bots (Cloudflare/Anubis). Try another URL.";
+    return { success: false, error: msg };
+  }
+
+  // use fetchedUrl as base for relative URL resolution
+  pageUrl = fetchedUrl;
 
   if (!html || typeof html !== "string" || html.length < 50) {
     return { success: false, error: "Empty or invalid HTML received" };
