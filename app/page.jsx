@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { scrapeImages } from "./actions/scraper";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
@@ -58,6 +59,22 @@ export default function Home() {
         return;
       }
       setData(result);
+      // save to history (localStorage)
+      try {
+        const raw = localStorage.getItem("pixelvault_history");
+        const history = raw ? JSON.parse(raw) : [];
+        const entry = {
+          id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+          pageUrl: url.trim(),
+          title: result.title,
+          groups: result.groups,
+          totalImages: result.groups.reduce((a, g) => a + g.urls.length, 0),
+          groupsCount: result.groups.length,
+          createdAt: new Date().toISOString(),
+        };
+        const newHistory = [entry, ...history].slice(0, 50);
+        localStorage.setItem("pixelvault_history", JSON.stringify(newHistory));
+      } catch {}
     } catch (err) {
       setError(err.message || "Unexpected error");
     } finally {
@@ -200,7 +217,12 @@ export default function Home() {
       {/* TOP NAV */}
       <header className="border-b border-neutral-900">
         <div className="max-w-[1280px] mx-auto px-6 md:px-8 h-[48px] flex items-center justify-between">
-          <span className="text-[11px] tracking-[0.22em] font-mono uppercase">(TOOLS)</span>
+          <div className="flex items-center gap-4 md:gap-6">
+            <span className="text-[11px] tracking-[0.22em] font-mono uppercase">(TOOLS)</span>
+            <Link href="/history" className="text-[11px] tracking-[0.22em] font-mono uppercase border border-neutral-900 px-2.5 py-1 bg-white hover:bg-neutral-900 hover:text-white">
+              (HISTORY)
+            </Link>
+          </div>
           <span className="text-[11px] tracking-[0.22em] font-mono uppercase hidden md:inline">
             (IMAGE SCRAPER — 2026)
           </span>
