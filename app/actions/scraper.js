@@ -5,7 +5,7 @@ import * as cheerio from "cheerio";
 import https from "https";
 import http from "http";
 
-// Keep-alive agents - universal, works for most sites incl. adult/CDN
+// Keep-alive agents for universal compatibility (e-commerce, CDN, adult)
 const httpsAgent = new https.Agent({ keepAlive: true, rejectUnauthorized: true });
 const httpAgent = new http.Agent({ keepAlive: true });
 
@@ -13,7 +13,6 @@ const UAS = [
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36",
-  "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
 ];
 
 function buildHeaders(targetUrl) {
@@ -25,7 +24,7 @@ function buildHeaders(targetUrl) {
   return {
     "User-Agent": ua,
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
     "Accept-Encoding": "gzip, deflate, br",
     "Cache-Control": "no-cache",
     Pragma: "no-cache",
@@ -42,6 +41,10 @@ function buildHeaders(targetUrl) {
   };
 }
 
+/**
+ * Extract highest resolution from srcset / data-srcset
+ * Per spec: usually last item is highest; we also handle w/x descriptors
+ */
 function pickHighestFromSrcset(srcset) {
   if (!srcset || typeof srcset !== "string") return null;
   const entries = srcset
@@ -63,7 +66,7 @@ function pickHighestFromSrcset(srcset) {
     .filter((e) => e.url);
   if (entries.length === 0) return null;
   const hasScore = entries.some((e) => e.score > 0);
-  if (!hasScore) return entries[entries.length - 1].url;
+  if (!hasScore) return entries[entries.length - 1].url; // last = highest per spec
   entries.sort((a, b) => b.score - a.score);
   return entries[0].url;
 }
@@ -75,12 +78,24 @@ function sanitizeTitle(raw) {
   return t || "Product_Images";
 }
 
+function isValidImageHref(href) {
+  if (!href || typeof href !== "string") return false;
+  href = href.trim().replace(/&quot;/g, "");
+  // Must point to image file per spec: .jpg, .png, .jpeg, .webp, .avif, .gif, .svg
+  if (!href.match(/\.(jpg|jpeg|png|webp|avif|gif|svg)(\?.*)?$/i)) return false;
+  // Accept absolute, protocol-relative, or root-relative
+  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//") || href.startsWith("/")) return true;
+  // Also accept relative with image extension (e.g., images/pic.jpg)
+  if (href.match(/^[^?#]+\.(jpg|jpeg|png|webp|avif|gif|svg)/i)) return true;
+  return false;
+}
+
 async function fetchHtmlWithRetry(pageUrl, maxRetries = 3) {
   let lastErr;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       const { data } = await axios.get(pageUrl, {
-        timeout: 15000,
+        timeout: 10000, // spec: 10s
         headers: buildHeaders(pageUrl),
         validateStatus: (s) => s >= 200 && s < 400,
         maxRedirects: 5,
@@ -88,8 +103,7 @@ async function fetchHtmlWithRetry(pageUrl, maxRetries = 3) {
         decompress: true,
         httpAgent,
         httpsAgent,
-        // Force IPv4 on retry to avoid ECONNRESET on some hosts
-        family: attempt > 1 ? 4 : undefined,
+        family: attempt > 1 ? 4 : undefined, // IPv4 fallback helps ECONNRESET on some hosts
       });
       if (typeof data === "string" && data.length > 0) return data;
       throw new Error("Empty response from server");
@@ -116,7 +130,6 @@ async function fetchHtmlWithRetry(pageUrl, maxRetries = 3) {
         status === 504 ||
         status === 408 ||
         status === 403;
-
       if (attempt < maxRetries && isRetryable) {
         const delay = Math.pow(2, attempt) * 700 + Math.random() * 500;
         await new Promise((r) => setTimeout(r, delay));
@@ -146,11 +159,11 @@ export async function scrapeImages(pageUrl) {
   try {
     html = await fetchHtmlWithRetry(pageUrl, 3);
   } catch (err) {
-    // Fallback to native fetch (undici) - sometimes axios is blocked but fetch works
+    // Fallback to native fetch (undici) — sometimes axios blocked but fetch works
     try {
       const res = await fetch(pageUrl, {
         headers: buildHeaders(pageUrl),
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(10000),
         redirect: "follow",
       });
       if (!res.ok) throw new Error(`Fetch failed ${res.status} ${res.statusText}`);
@@ -161,8 +174,9 @@ export async function scrapeImages(pageUrl) {
       const msg = status
         ? `Request failed with status ${status}: ${err.response?.statusText || err.message}`
         : err.code === "ECONNABORTED" || fallbackErr.name === "TimeoutError"
-        ? "Request timed out after 15s — site may be slow or blocking Vercel IPs. Try again."
-        : (err.message && err.message.includes("ECONNRESET")) || (fallbackErr.message || "").toLowerCase().includes("econnreset")
+        ? "Request timed out after 10s — site may be slow or blocking Vercel IPs. Try again."
+        : (err.message && err.message.toLowerCase().includes("econnreset")) ||
+          (fallbackErr.message || "").toLowerCase().includes("econnreset")
         ? "Connection reset by target site (ECONNRESET) — site is blocking bot / Vercel IP. Retried 3x. Try again in 10s or try http:// variant."
         : err.message || fallbackErr.message || "Failed to fetch page";
       return { success: false, error: msg };
@@ -175,6 +189,7 @@ export async function scrapeImages(pageUrl) {
 
   const $ = cheerio.load(html);
 
+  // Title extraction & sanitization — per spec: Clean Title
   let rawTitle = $("h1").first().text().trim();
   if (!rawTitle) rawTitle = $("title").first().text().trim();
   if (!rawTitle) rawTitle = $('meta[property="og:title"]').attr("content") || "";
@@ -211,9 +226,7 @@ export async function scrapeImages(pageUrl) {
     src = src.trim();
     if (!src || src.startsWith("data:image") || src.startsWith("data:") || src.includes("favicon")) return null;
     src = src.replace(/&quot;/g, "").replace(/^['"]|['"]$/g, "").trim();
-    if (!src) return null;
-    if (src.startsWith("data:")) return null;
-    // filter out javascript:, mailto:
+    if (!src || src.startsWith("data:")) return null;
     if (src.startsWith("javascript:") || src.startsWith("mailto:")) return null;
     try {
       if (src.startsWith("//")) src = "https:" + src;
@@ -240,51 +253,64 @@ export async function scrapeImages(pageUrl) {
     groups[selector].add(abs);
   };
 
-  // ---- 4a. <img> ----
+  // ==========================================
+  // Smart HD Image Extraction — EXACT PRIORITY per spec
+  // ==========================================
+
+  // For every <img>, apply priority order:
+  // 1. <a> wrapping href to image file
+  // 2. data-zoom-image, data-original, data-large, data-highres
+  // 3. srcset / data-srcset highest resolution (last / max w/x)
+  // 4. fallback data-src or src
   $("img").each((_, el) => {
     const $el = $(el);
     let raw = null;
-    const srcsetRaw = $el.attr("srcset") || $el.attr("data-srcset") || $el.attr("data-src-set");
-    if (srcsetRaw) {
-      const p = pickHighestFromSrcset(srcsetRaw);
-      if (p) raw = p;
-    }
-    if (!raw) {
-      raw =
-        $el.attr("src") ||
-        $el.attr("data-src") ||
-        $el.attr("data-original") ||
-        $el.attr("data-lazy-src") ||
-        $el.attr("data-lazy") ||
-        $el.attr("data-url") ||
-        $el.attr("data-actual") ||
-        $el.attr("data-image") ||
-        $el.attr("data-thumb") ||
-        $el.attr("data-large") ||
-        null;
-    }
-    // also check data attributes generically for any img
-    if (!raw) {
-      const attrs = el.attribs || {};
-      for (const [k, v] of Object.entries(attrs)) {
-        if (k.startsWith("data-") && typeof v === "string" && v.match(/^https?:\/\//) && v.match(/\.(jpg|jpeg|png|webp|avif|gif)/i)) {
-          raw = v;
-          break;
-        }
+
+    // 1. Check if wrapped in <a> pointing to valid image
+    const $anchor = $el.closest("a");
+    if ($anchor.length) {
+      const href = $anchor.attr("href");
+      if (isValidImageHref(href)) {
+        raw = href;
       }
     }
+
+    // 2. E-commerce HD data attributes (highest priority after anchor)
+    if (!raw) {
+      raw =
+        $el.attr("data-zoom-image") ||
+        $el.attr("data-original") ||
+        $el.attr("data-large") ||
+        $el.attr("data-highres") ||
+        null;
+    }
+
+    // 3. srcset / data-srcset — highest resolution
+    if (!raw) {
+      const srcsetRaw = $el.attr("srcset") || $el.attr("data-srcset");
+      if (srcsetRaw) {
+        const picked = pickHighestFromSrcset(srcsetRaw);
+        if (picked) raw = picked;
+      }
+    }
+
+    // 4. Fallback data-src or src
+    if (!raw) {
+      raw = $el.attr("data-src") || $el.attr("src") || null;
+    }
+
     if (raw) addToGroup(el, raw);
   });
 
-  // ---- 4b. <picture> <source> ----
+  // <picture><source> — srcset handling
   $("picture source, source").each((_, el) => {
     const $el = $(el);
-    let srcsetRaw = $el.attr("srcset") || $el.attr("data-srcset") || $el.attr("data-src");
+    let srcsetRaw = $el.attr("srcset") || $el.attr("data-srcset");
     let picked = null;
     if (srcsetRaw) picked = pickHighestFromSrcset(srcsetRaw);
     if (picked) addToGroup(el, picked);
     else {
-      const fb = $el.attr("src") || $el.attr("data-src") || $el.attr("srcset");
+      const fb = $el.attr("src") || $el.attr("data-src");
       if (fb) {
         const mp = fb.includes(",") ? pickHighestFromSrcset(fb) : fb;
         if (mp) addToGroup(el, mp);
@@ -292,7 +318,7 @@ export async function scrapeImages(pageUrl) {
     }
   });
 
-  // ---- 4c. Inline style background-image ----
+  // style="background-image: url(...)" — per spec
   $('[style*="background"]').each((_, el) => {
     const style = $(el).attr("style");
     if (!style) return;
@@ -305,7 +331,11 @@ export async function scrapeImages(pageUrl) {
     }
   });
 
-  // ---- 4d. <style> tags with background images ----
+  // ----- Universal fallback extras — ensures every type of website -----
+  // These run AFTER HD logic, so spec priority is preserved, but we still
+  // catch images hidden in CSS files, meta, JSON-LD, and JS variables.
+
+  // <style> tags
   $("style").each((_, el) => {
     const css = $(el).html() || "";
     const re = /url\(['"]?(https?:\/\/[^'")]+|[^'")]+)['"]?\)/g;
@@ -317,89 +347,68 @@ export async function scrapeImages(pageUrl) {
     }
   });
 
-  // ---- 4e. Generic data-* attributes on any element ----
-  $("[data-src], [data-original], [data-lazy-src], [data-srcset], [data-background], [data-bg], [data-image], [data-thumb]").each((_, el) => {
+  // Generic data-* on any element (catches divs with data-src)
+  $("[data-src], [data-original], [data-large], [data-highres], [data-zoom-image], [data-srcset], [data-background], [data-bg]").each((_, el) => {
+    // Skip <img> already handled
+    if (el.name === "img" || el.tagName?.toLowerCase() === "img") return;
     const $el = $(el);
     const cand =
-      $el.attr("data-src") ||
+      $el.attr("data-zoom-image") ||
       $el.attr("data-original") ||
-      $el.attr("data-lazy-src") ||
+      $el.attr("data-large") ||
+      $el.attr("data-highres") ||
+      $el.attr("data-src") ||
       $el.attr("data-srcset") ||
       $el.attr("data-background") ||
-      $el.attr("data-bg") ||
-      $el.attr("data-image") ||
-      $el.attr("data-thumb");
+      $el.attr("data-bg");
     if (cand) {
       const picked = cand.includes(",") && cand.includes(" ") ? pickHighestFromSrcset(cand) : cand;
       if (picked) addToGroup(el, picked);
     }
   });
 
-  // ---- 4f. Meta & Link tags (og:image, twitter:image) ----
+  // Meta & link
   $('meta[property="og:image"], meta[property="og:image:url"], meta[name="twitter:image"], meta[name="twitter:image:src"], meta[itemprop="image"]').each((_, el) => {
     const c = $(el).attr("content");
-    if (c) addToSelector('meta:og:image', c);
+    if (c) addToSelector("meta:og:image", c);
   });
   $('link[rel="image_src"]').each((_, el) => {
     const h = $(el).attr("href");
-    if (h) addToSelector('link:image_src', h);
+    if (h) addToSelector("link:image_src", h);
   });
 
-  // ---- 4g. Anchor hrefs that are direct images (common on galleries like pornpics) ----
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href");
-    if (!href) return;
-    if (href.match(/\.(jpg|jpeg|png|webp|avif|gif)(\?.*)?$/i) && href.startsWith("http")) {
-      addToSelector("a:href-image", href);
-    }
-    // also relative image hrefs
-    if (href.match(/\.(jpg|jpeg|png|webp|avif|gif)(\?.*)?$/i) && href.startsWith("/")) {
-      addToSelector("a:href-image", href);
-    }
-  });
-
-  // ---- 4h. JSON-LD and inline scripts with image URLs ----
+  // JSON-LD
   $('script[type="application/ld+json"]').each((_, el) => {
     const txt = $(el).html() || "";
     const re = /"image"\s*:\s*"([^"]+)"/g;
     let m;
-    while ((m = re.exec(txt)) !== null) {
-      let src = m[1];
-      if (src) addToSelector("script:ld+json:image", src);
-    }
+    while ((m = re.exec(txt)) !== null) if (m[1]) addToSelector("script:ld+json:image", m[1]);
     const re2 = /https?:\/\/[^"']+\.(?:jpg|jpeg|png|webp|avif|gif)[^"']*/gi;
     let m2;
-    while ((m2 = re2.exec(txt)) !== null) {
-      addToSelector("script:ld+json:raw", m2[0]);
-    }
+    while ((m2 = re2.exec(txt)) !== null) addToSelector("script:ld+json:raw", m2[0]);
   });
 
-  // ---- 4i. Raw HTML regex fallback - catches JS-injected image URLs ----
-  // This ensures "every type of website" even if images are inside JS variables
+  // Raw HTML regex fallback — JS-injected URLs
   try {
     const rawRe = /https?:\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|avif|gif)(?:\?[^\s"'<>]*)?/gi;
     let m;
-    const seenRaw = new Set();
+    const seen = new Set();
     while ((m = rawRe.exec(html)) !== null) {
-      let url = m[0];
-      // Clean trailing punctuation like ),",'
-      url = url.replace(/[),"'`]+$/, "");
-      if (seenRaw.has(url)) continue;
-      seenRaw.add(url);
-      // Skip already captured via cheerio to avoid bloat, but if groups empty this is crucial
+      let url = m[0].replace(/[),"'`]+$/, "");
+      if (seen.has(url)) continue;
+      seen.add(url);
       addToSelector("raw:html:regex", url);
     }
-    // Also catch protocol-relative //cdn.../*.jpg
     const protoRe = /\/\/[^\s"'<>]+\.(?:jpg|jpeg|png|webp|avif|gif)(?:\?[^\s"'<>]*)?/gi;
     while ((m = protoRe.exec(html)) !== null) {
       let url = "https:" + m[0].replace(/[),"'`]+$/, "");
-      if (seenRaw.has(url)) continue;
-      seenRaw.add(url);
+      if (seen.has(url)) continue;
+      seen.add(url);
       addToSelector("raw:html:regex", url);
     }
   } catch {}
 
-  // ---- 5. Deduplication + formatting ----
+  // ---- Deduplicated absolute URLs per spec ----
   const resultGroups = Object.keys(groups)
     .map((selector) => ({
       selector,
@@ -411,13 +420,11 @@ export async function scrapeImages(pageUrl) {
   if (resultGroups.length === 0) {
     return {
       success: false,
-      error: "No valid images found on this page — site may render images via JS (client-side) or block bots. Try another URL.",
+      error: "No valid images found on this page — site may render images via JS or block bots. Try another URL.",
       title,
       groups: [],
     };
   }
-
-  // Optional: filter out tiny tracking pixels (1x1) if needed? Keep for now to be universal
 
   return {
     success: true,
